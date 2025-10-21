@@ -159,8 +159,223 @@ const createMaterialController = async (req, res) => {
   }
 };
 
+
+// NOVO CONTROLLER 
+const getAllMaterialsController = async (req, res) => {
+  // Extrair query params para paginação e filtros
+  const { page = 1, limit = 10, title, type, authorName } = req.query;
+
+  // Converter para números
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+
+  // Calcular o 'skip' (pulo) para o Prisma
+  const skip = (pageNum - 1) * limitNum;
+
+  // Construir o objeto 'where' para os filtros
+  const where = {
+    status: 'PUBLICADO', // (Req 2.3: Apenas materiais públicos)
+  };
+
+  // Adiciona filtros ao 'where' se eles foram fornecidos na query
+  if (title) {
+    where.title = {
+      contains: title,
+      mode: 'insensitive', // Para não diferenciar maiúsculas/minúsculas
+    };
+  }
+  if (type) {
+    where.type = {
+      equals: type.toUpperCase(),
+    };
+  }
+  if (authorName) {
+    where.author = {
+      name: {
+        contains: authorName,
+        mode: 'insensitive',
+      },
+    };
+  }
+
+  try {
+    // 1. Executar a query com filtros e paginação
+    const materials = await prisma.material.findMany({
+      where: where,
+      skip: skip,
+      take: limitNum,
+      include: {
+        author: true, // Inclui o autor nos resultados
+        creator: { select: { id: true, email: true } }, // Inclui o criador
+      },
+    });
+
+    // 2. Obter a contagem total de itens (para o frontend saber o total de páginas)
+    const totalMaterials = await prisma.material.count({
+      where: where,
+    });
+
+    // 3. Responder com os dados e metadados da paginação
+    res.status(200).json({
+      data: materials,
+      pagination: {
+        totalItems: totalMaterials,
+        totalPages: Math.ceil(totalMaterials / limitNum),
+        currentPage: pageNum,
+        itemsPerPage: limitNum,
+      },
+    });
+  } catch (error) {
+    console.error('Erro ao buscar materiais:', error);
+    res.status(500).json({ error: 'Não foi possível processar sua solicitação.' });
+  }
+};
+
+
+// NOVO CONTROLLER (READ ONE - Ver um material por ID)
+const getMaterialByIdController = async (req, res) => {
+  const { id } = req.params;
+  const materialId = parseInt(id);
+
+  if (isNaN(materialId)) {
+    return res.status(400).json({ error: 'ID do material inválido.' });
+  }
+
+  try {
+    const material = await prisma.material.findUnique({
+      where: {
+        id: materialId,
+      },
+      include: {
+        author: true,
+        creator: { select: { id: true, email: true } },
+      },
+    });
+
+    // Se não encontrar o material
+    if (!material) {
+      return res.status(404).json({ error: 'Material não encontrado.' });
+    }
+
+    // Se o material não estiver PUBLICADO (pode ser RASCUNHO/ARQUIVADO)
+    if (material.status !== 'PUBLICADO') {
+      // Usuários só podem ver materiais públicos.
+      //(Futuramente, podemos adicionar uma lógica para o próprio criador ver)
+      return res.status(403).json({ error: 'Este material não está disponível publicamente.' });
+    }
+
+    res.status(200).json(material);
+
+  } catch (error) {
+    res.status(500).json({ error: 'Não foi possível processar sua solicitação.' });
+  }
+};
+
+const updateMaterialController = async (req, res) => {
+  const { id } = req.params; // ID do material a ser atualizado
+  const userId = req.user.userId; // ID do usuário logado (do token)
+  const dataToUpdate = req.body; // Novos dados (title, description, status, etc.)
+
+  const materialId = parseInt(id);
+  if (isNaN(materialId)) {
+    return res.status(400).json({ error: 'ID do material inválido.' });
+  }
+
+  try {
+    // 1. Buscar o material no banco
+    const material = await prisma.material.findUnique({
+      where: { id: materialId },
+    });
+
+    // 2. Checar se o material existe
+    if (!material) {
+      return res.status(404).json({ error: 'Material não encontrado.' });
+    }
+
+    // 3. VERIFICAÇÃO DE PERMISSÃO 
+    // O usuário logado é o mesmo que criou o material?
+    if (material.creatorId !== userId) {
+      return res.status(403).json({ error: 'Acesso negado. Você não é o criador deste material.' });
+    }
+
+    // 4.  Validar os dados que estão sendo atualizados
+    if (dataToUpdate.status && !['RASCUNHO', 'PUBLICADO', 'ARQUIVADO'].includes(dataToUpdate.status)) {
+      return res.status(400).json({ error: 'Status inválido.' });
+    }
+    if (dataToUpdate.title && (dataToUpdate.title.length < 3 || dataToUpdate.title.length > 100)) {
+      return res.status(400).json({ error: 'O Título deve ter entre 3 e 100 caracteres.' });
+    }
+    
+    // 5. Atualizar o material (apenas campos permitidos)
+    const updatedMaterial = await prisma.material.update({
+      where: { id: materialId },
+      data: {
+        title: dataToUpdate.title,
+        description: dataToUpdate.description,
+        status: dataToUpdate.status,
+        // (Campos como ISBN, DOI, etc., são omitidos para evitar revalidação complexa)
+        // (Se você quiser permitir a atualização deles, precisa validar unicidade de novo)
+      },
+      include: {
+        author: true,
+        creator: { select: { id: true, email: true } },
+      },
+    });
+
+    res.status(200).json(updatedMaterial);
+
+  } catch (error) {
+    console.error('Erro ao atualizar material:', error);
+    res.status(500).json({ error: 'Não foi possível processar sua solicitação.' });
+  }
+};
+
+// NOVO CONTROLLER DELETE 
+const deleteMaterialController = async (req, res) => {
+  const { id } = req.params; // ID do material
+  const userId = req.user.userId; // ID do usuário logado
+
+  const materialId = parseInt(id);
+  if (isNaN(materialId)) {
+    return res.status(400).json({ error: 'ID do material inválido.' });
+  }
+
+  try {
+    // 1. Buscar o material
+    const material = await prisma.material.findUnique({
+      where: { id: materialId },
+    });
+
+    // 2. Checar se existe
+    if (!material) {
+      return res.status(404).json({ error: 'Material não encontrado.' });
+    }
+
+    // 3. VERIFICAÇÃO DE PERMISSÃO 
+    if (material.creatorId !== userId) {
+      return res.status(403).json({ error: 'Acesso negado. Você não é o criador deste material.' });
+    }
+
+    // 4. Deletar o material
+    await prisma.material.delete({
+      where: { id: materialId },
+    });
+
+    // 5. Responder com sucesso (204 No Content)
+    res.status(204).send();
+
+  } catch (error) {
+    console.error('Erro ao deletar material:', error);
+    res.status(500).json({ error: 'Não foi possível processar sua solicitação.' });
+  }
+};
+
 const existingExports = module.exports || {};
 module.exports = {
   ...existingExports,
   createMaterialController,
+  getAllMaterialsController,
+  getMaterialByIdController,
+  updateMaterialController,
+  deleteMaterialController,
 };
