@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique 
+  password  String   
+  
+  // Campos de controle
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relação com material
+  materials Material[] 
+}
+
+enum MaterialStatus {
+  RASCUNHO
+  PUBLICADO
+  ARQUIVADO
+}
+
+enum AuthorType {
+  PESSOA
+  INSTITUICAO
+}
+
+model Autor {
+  id    Int      @id @default(autoincrement())
+  name  String
+  type  AuthorType
+
+  // Para PESSOA
+  data_nascimento DateTime? 
+
+  // Para INSTITUICAO
+  cidade          String?  
+  
+  // Relação
+  materials Material[]
+}
+
+model Material {
+  id          Int      @id @default(autoincrement())
+  
+  title       String
+  description String?
+  type        String   // Ex: "LIVRO", "ARTIGO", "VIDEO"
+  status      MaterialStatus @default(RASCUNHO) // (Req 2.4)
+
+  isbn        String? @unique // Específico para Livro
+  pages       Int?     // Específico para Livro/Artigo
+  doi         String? @unique // Específico para Artigo
+  durationMin Int?     // Específico para Vídeo
+  url         String?  // Específico para Vídeo/Artigo
+
+  // --- Relações Obrigatórias ---
+  
+  // Relação com Autor (Req 2.2: "Todo material deve estar associado a um autor")
+  // Um Material tem um Autor
+  author      Autor    @relation(fields: [authorId], references: [id])
+  authorId    Int
+
+  // Relação com Usuário (Req 2.3: "só pode ser alterado... pelo usuário que o cadastrou")
+  // Um Material tem um Usuário (criador)
+  creator     User     @relation(fields: [creatorId], references: [id])
+  creatorId   Int
+
+  // --- Campos de Controle ---
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
