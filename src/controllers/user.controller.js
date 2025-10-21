@@ -17,7 +17,7 @@ const createUserController = async (req, res) => {
     return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
   }
   if(!isEmailValid(email)){
-    return res.statues(400).json({error: 'Formato de email inválido'});
+    return res.status(400).json({error: 'Formato de e-mail inválido.'});
   }
   if (password.length < 6) { 
     return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres.' }); 
@@ -56,6 +56,15 @@ const createUserController = async (req, res) => {
 
 const loginController = async (req, res) => {
   const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
+  }
+
+  if (!isEmailValid(email)) {
+    return res.status(400).json({ error: 'Formato de e-mail inválido.' });
+  }
+
 
   try {
     // 1. Encontrar o usuário pelo e-mail
