@@ -17,7 +17,8 @@ const isValidISBN = (isbn) => {
 const createMaterialController = async (req, res) => {
   const creatorId = req.user.userId;
 
-  const {
+  // Usamos 'let' para que as variáveis possam ser modificadas pela API
+  let {
     title,
     type,
     authorId,
@@ -30,39 +31,28 @@ const createMaterialController = async (req, res) => {
     url,
   } = req.body;
 
-  // VALIDAÇÕES GERAIS 
+  // VALIDAÇÕES GERAIS (INICIAIS)
 
-  // 1. Campos obrigatórios GERAIS
-  if (!title || !type || !authorId) {
+  // 1. Campos obrigatórios GERAIS (Note que 'title' não é mais obrigatório AQUI)
+  if (!type || !authorId) {
     return res.status(400).json({
-      error: 'Campos obrigatórios ausentes: title, type, e authorId.',
+      error: 'Campos obrigatórios ausentes: type, e authorId.',
     });
   }
 
-  // 2. Validação de Título 
-  if (title.length < 3 || title.length > 100) {
-    return res.status(400).json({ error: 'O Título deve ter entre 3 e 100 caracteres.' });
-  }
-
-  // 3. Validação de Descrição 
-  if (description && description.length > 1000) {
-    return res.status(400).json({ error: 'A Descrição, quando informada, deve ter no máximo 1000 caracteres.' });
-  }
-  
-  // 4. Tentar parsear o ID do autor
+  // 2. Tentar parsear o ID do autor
   const parsedAuthorId = parseInt(authorId);
   if (isNaN(parsedAuthorId)) {
     return res.status(400).json({ error: 'authorId deve ser um número inteiro.' });
   }
 
-  // 5. Validar o status 
+  // 3. Validar o status
   if (status && !['RASCUNHO', 'PUBLICADO', 'ARQUIVADO'].includes(status)) {
     return res.status(400).json({ error: 'Status inválido. Use: RASCUNHO, PUBLICADO, ou ARQUIVADO.' });
   }
 
-
   try {
-    // 6. Verificar se o autor (authorId) realmente existe
+    // 4. Verificar se o autor (authorId) realmente existe
     const authorExists = await prisma.autor.findUnique({
       where: { id: parsedAuthorId },
     });
@@ -70,10 +60,48 @@ const createMaterialController = async (req, res) => {
     if (!authorExists) {
       return res.status(404).json({ error: 'Autor não encontrado com o ID fornecido.' });
     }
+
+    // =================================================================
+    // (NOVA LÓGICA) REQ 2.5: INTEGRAÇÃO COM OPENLIBRARY
+    // =================================================================
+    if (type.toUpperCase() === 'LIVRO' && isbn && (!title || !pages)) {
+      console.log(`Buscando dados na OpenLibrary para o ISBN: ${isbn}...`);
+      
+      // Valida o ISBN antes de chamar a API
+      if (!isValidISBN(isbn)) {
+         return res.status(400).json({ error: 'Formato de ISBN inválido (deve ter exatamente 13 dígitos numéricos).' }); 
+      }
+
+      const bookData = await fetchBookDataByISBN(isbn);
+
+      if (bookData) {
+        // Preenche os campos SÓ SE eles não foram fornecidos pelo usuário
+        title = title || bookData.title;
+        pages = pages || bookData.pages;
+        console.log(`Dados encontrados: Título="${title}", Páginas=${pages}`);
+      } else {
+         console.log(`Nenhum dado encontrado para o ISBN: ${isbn}.`);
+      }
+    }
+    // =================================================================
+    // FIM DA NOVA LÓGICA
+    // =================================================================
     
-    // Objeto de dados para salvar, começa com os dados genéricos validados
+    // VALIDAÇÕES (PÓS-API)
+    
+    // 5. Validação de Título (Agora obrigatório, manual ou via API)
+    if (!title || title.length < 3 || title.length > 100) {
+      return res.status(400).json({ error: 'O Título (manual ou via ISBN) é obrigatório e deve ter entre 3 e 100 caracteres.' });
+    }
+
+    // 6. Validação de Descrição
+    if (description && description.length > 1000) {
+      return res.status(400).json({ error: 'A Descrição, quando informada, deve ter no máximo 1000 caracteres.' });
+    }
+    
+    // Objeto de dados para salvar
     const dataToSave = {
-      title,
+      title, // (agora pode ter vindo da API)
       type: type.toUpperCase(),
       authorId: parsedAuthorId,
       creatorId: creatorId,
@@ -81,21 +109,22 @@ const createMaterialController = async (req, res) => {
       description: description || null,
     };
 
-    // 7. VALIDAÇÕES ESPECÍFICAS 
+    // 7. VALIDAÇÕES ESPECÍFICAS
     switch (type.toUpperCase()) {
       case 'LIVRO':
+        // A validação de ISBN já foi feita acima (antes da API)
+        // Agora validamos se 'pages' (manual ou da API) existe
         if (!isbn || !pages) {
-          return res.status(400).json({ error: 'Para o tipo "LIVRO", os campos "isbn" e "pages" são obrigatórios.' });
+          return res.status(400).json({ error: 'Para o tipo "LIVRO", os campos "isbn" e "pages" são obrigatórios (podem ser preenchidos via API).' });
         }
-        if (!isValidISBN(isbn)) {
-          return res.status(400).json({ error: 'Formato de ISBN inválido (deve ter exatamente 13 dígitos numéricos).' }); 
-        }
-        const parsedPages = parseInt(pages);
+        
+        // A validação de formato do ISBN já foi feita na lógica da API
+        
+        const parsedPages = parseInt(pages); // 'pages' pode ser string ou int
         if (isNaN(parsedPages) || parsedPages < 1) {
           return res.status(400).json({ error: 'Número de páginas deve ser um número maior que zero.' }); 
         }
         
-        // Adiciona os campos de LIVRO aos dados
         dataToSave.isbn = isbn;
         dataToSave.pages = parsedPages;
         break;
@@ -107,8 +136,6 @@ const createMaterialController = async (req, res) => {
         if (!isValidDOI(doi)) {
           return res.status(400).json({ error: 'Formato de DOI inválido (ex: 10.1234/exemplo).' });
         }
-        
-        // Adiciona os campos de ARTIGO
         dataToSave.doi = doi;
         break;
 
@@ -120,13 +147,12 @@ const createMaterialController = async (req, res) => {
         if (isNaN(parsedDuration) || parsedDuration < 1) {
           return res.status(400).json({ error: 'Duração (minutos) deve ser um número maior que zero.' }); 
         }
-        
-        // Adiciona os campos de VIDEO
         dataToSave.url = url;
         dataToSave.durationMin = parsedDuration;
         break;
 
       default:
+        // Se o tipo não for LIVRO, ARTIGO ou VIDEO, apenas os campos gerais são salvos
         break;
     }
     
@@ -143,8 +169,7 @@ const createMaterialController = async (req, res) => {
     res.status(201).json(newMaterial);
 
   } catch (error) {
-    // Tratamento de Erro de Unicidade 
-    if (error.code === 'P2002') { // Erro do Prisma: "Unique constraint failed"
+    if (error.code === 'P2002') {
       if (error.meta?.target?.includes('isbn')) {
         return res.status(409).json({ error: 'Este ISBN já está cadastrado.' });
       }
@@ -153,7 +178,6 @@ const createMaterialController = async (req, res) => {
       }
     }
     
-    // Erro genérico
     console.error('Erro ao criar material:', error);
     res.status(500).json({ error: 'Não foi possível processar sua solicitação.' });
   }
@@ -369,6 +393,39 @@ const deleteMaterialController = async (req, res) => {
     res.status(500).json({ error: 'Não foi possível processar sua solicitação.' });
   }
 };
+
+// Helper para buscar dados em Open library
+const fetchBookDataByISBN = async (isbn) => {
+  const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`;
+
+  try {
+    // Usamos fetch (nativo do Node.js >= 18)
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`API OpenLibrary respondeu com status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const bookKey = `ISBN:${isbn}`;
+
+    // A API retorna um objeto com a chave "ISBN:12345"
+    if (data && data[bookKey]) {
+      const bookInfo = data[bookKey];
+      return {
+        title: bookInfo.title,
+        pages: bookInfo.number_of_pages,
+      };
+    }
+    return null; // ISBN não encontrado na OpenLibrary
+  } catch (error) {
+    console.error(`Erro ao buscar dados do ISBN ${isbn}:`, error.message);
+    // Retornamos null para não quebrar a requisição principal
+    return null;
+  }
+};
+
+
+
 
 const existingExports = module.exports || {};
 module.exports = {

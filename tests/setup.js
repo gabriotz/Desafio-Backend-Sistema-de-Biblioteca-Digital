@@ -1,39 +1,39 @@
-// tests/setup.js
-console.log('✅ Setup carregado - inicializando Prisma...');
+require('dotenv').config({ path: '.env.test' });
 
 let prisma;
 
 try {
-  // Use o caminho correto baseado na geração do Prisma
   const { PrismaClient } = require('../src/generated/prisma');
   prisma = new PrismaClient();
+  
+  // 🚨 VERIFICAÇÃO DE SEGURANÇA
+  if (!process.env.DATABASE_URL.includes('test') && !process.env.DATABASE_URL.includes('TEST')) {
+    console.error('🚨 PERIGO: Banco não é de teste!');
+    console.error('DATABASE_URL:', process.env.DATABASE_URL);
+    console.error('PARE OS TESTES!');
+    process.exit(1);
+  }
+  
+  console.log('🔗 Conectando ao banco de teste...');
   global.prisma = prisma;
-  console.log('✅ Prisma inicializado com sucesso');
+
 } catch (error) {
   console.log('❌ Erro ao inicializar Prisma:', error.message);
-  // Fallback para mock
-  global.prisma = {
-    user: { 
-      findUnique: () => Promise.resolve(null), 
-      create: () => Promise.resolve({}),
-      deleteMany: () => Promise.resolve()
-    },
-    material: { deleteMany: () => Promise.resolve() },
-    autor: { deleteMany: () => Promise.resolve() },
-    $disconnect: () => Promise.resolve()
-  };
+  process.exit(1);
 }
 
-// Limpeza do banco
-beforeAll(async () => {
-  await prisma.$connect();
-  global.prisma = prisma;
-});
+// Configurações do Jest
+if (typeof beforeAll !== 'undefined' && typeof afterAll !== 'undefined') {
+  beforeAll(async () => {
+    await prisma.$connect();
+  });
 
-// Limpeza completa após todos os testes
-afterAll(async () => {
-  await prisma.material.deleteMany();
-  await prisma.autor.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.$disconnect();
-});
+  afterAll(async () => {
+    await prisma.material.deleteMany();
+    await prisma.autor.deleteMany();
+    await prisma.user.deleteMany();
+    await prisma.$disconnect();
+  });
+}
+
+module.exports = prisma;

@@ -1,9 +1,13 @@
 const request = require('supertest');
 const app = require('../../src/app');
-const prisma = global.prisma; // Importa o Prisma
+const prisma = global.prisma;
 const jwt = require('jsonwebtoken');
 
 jest.setTimeout(30000);
+
+// Mock do fetch global - DEVE SER NO TOPO DO ARQUIVO
+global.fetch = jest.fn();
+
 describe('Materials Integration Tests', () => {
   let userA, userB, tokenA, tokenB, authorA;
 
@@ -17,6 +21,7 @@ describe('Materials Integration Tests', () => {
     await prisma.material.deleteMany();
     await prisma.autor.deleteMany();
     await prisma.user.deleteMany();
+    jest.clearAllMocks();
   });
 
   // Desconecta do banco depois de todos os testes
@@ -106,7 +111,6 @@ describe('Materials Integration Tests', () => {
       expect(response.body.url).toBe('https://exemplo.com/video');
     });
 
-
     it('deve falhar sem autenticação (401)', async () => {
       const response = await request(app)
         .post('/api/v1/materials')
@@ -185,13 +189,12 @@ describe('Materials Integration Tests', () => {
         });
 
       expect(response.status).toBe(400);
-      expect(response.body.error).toBe('Para o tipo "LIVRO", os campos "isbn" e "pages" são obrigatórios.');
+      expect(response.body.error).toBe('Para o tipo "LIVRO", os campos "isbn" e "pages" são obrigatórios (podem ser preenchidos via API).');
     });
   });
 
   // ===========================================
   // 2. TESTES DE READ (GET)
-  // (Este bloco já estava robusto e não precisou de mudanças)
   // ===========================================
   describe('GET /api/v1/materials', () => {
     let materialPublico, materialRascunho;
@@ -284,7 +287,6 @@ describe('Materials Integration Tests', () => {
 
   // ===========================================
   // 3. TESTES DE UPDATE & DELETE
-  // (Este bloco já estava robusto e não precisou de mudanças)
   // ===========================================
   describe('PATCH & DELETE /api/v1/materials/:id', () => {
     let materialDoUserA;
@@ -379,6 +381,231 @@ describe('Materials Integration Tests', () => {
       // Verifica se foi deletado mesmo
       const findResponse = await request(app).get(`/api/v1/materials/${materialDoUserA.id}`);
       expect(findResponse.status).toBe(404); // Não deve mais encontrar
+    });
+  });
+  // ===========================================
+  // 4. TESTES DE INTEGRAÇÃO COM OPENLIBRARY API
+  // ===========================================
+  describe('Integração com OpenLibrary API', () => {
+    let userA, tokenA, authorA;
+
+    beforeEach(async () => {
+      userA = await prisma.user.create({
+        data: {
+          email: `user.a.openlib.${Date.now()}@teste.com`,
+          password: 'password123',
+        },
+      });
+
+      tokenA = jwt.sign({ userId: userA.id }, process.env.JWT_SECRET);
+
+      authorA = await prisma.autor.create({
+        data: {
+          name: `Autor OpenLib ${Date.now()}`,
+          type: 'PESSOA',
+          data_nascimento: new Date('1990-01-01'),
+        },
+      });
+    });
+
+    afterEach(async () => {
+      await prisma.material.deleteMany();
+    });
+
+    it('deve preencher automaticamente título e páginas via ISBN da OpenLibrary (201)', async () => {
+      // Mock da resposta da OpenLibrary
+      const mockOpenLibraryResponse = {
+        'ISBN:9788532511010': {
+          title: 'Harry Potter e a Pedra Filosofal',
+          number_of_pages: 264
+        }
+      };
+
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockOpenLibraryResponse
+      });
+
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: '9788532511010',
+          // Não enviando title e pages - devem ser preenchidos pela API
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.title).toBe('Harry Potter e a Pedra Filosofal');
+      expect(response.body.pages).toBe(264);
+      expect(response.body.isbn).toBe('9788532511010');
+      
+      // Verifica se o fetch foi chamado com a URL correta
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://openlibrary.org/api/books?bibkeys=ISBN:9788532511010&format=json&jscmd=data'
+      );
+    });
+
+    it('deve usar título manual quando fornecido, mesmo com ISBN válido (201)', async () => {
+      // Mock da resposta da OpenLibrary
+      const mockOpenLibraryResponse = {
+        'ISBN:9788532511011': {
+          title: 'Harry Potter e a Pedra Filosofal',
+          number_of_pages: 264
+        }
+      };
+
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockOpenLibraryResponse
+      });
+
+      const tituloManual = 'Título Manual Sobrescrevendo API';
+      
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: '9788532511011',
+          title: tituloManual, // Título manual deve ter prioridade
+          // pages não enviado - deve ser preenchido pela API
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.title).toBe(tituloManual); // Deve usar o título manual
+      expect(response.body.pages).toBe(264); // Mas páginas da API
+    });
+
+    it('deve usar páginas manuais quando fornecidas, mesmo com ISBN válido (201)', async () => {
+      // Mock da resposta da OpenLibrary
+      const mockOpenLibraryResponse = {
+        'ISBN:9788532511012': {
+          title: 'Harry Potter e a Pedra Filosofal',
+          number_of_pages: 264
+        }
+      };
+
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockOpenLibraryResponse
+      });
+
+      const paginasManuais = 999;
+      
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: '9788532511012',
+          pages: paginasManuais, // Páginas manuais devem ter prioridade
+          // title não enviado - deve ser preenchido pela API
+        });
+
+      expect(response.status).toBe(201);
+      expect(response.body.title).toBe('Harry Potter e a Pedra Filosofal'); // Título da API
+      expect(response.body.pages).toBe(paginasManuais); // Mas páginas manuais
+    });
+
+    it('deve falhar com ISBN inválido mesmo sendo de livro (400)', async () => {
+      const isbnInvalido = '123'; // ISBN muito curto
+      
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: isbnInvalido,
+          // Não enviando title e pages
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Formato de ISBN inválido');
+      // O fetch não deve ser chamado para ISBN inválido
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('deve criar livro normalmente quando API retorna null mas campos foram fornecidos (201)', async () => {
+      // Mock da resposta vazia (livro não encontrado)
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}) // Retorna objeto vazio
+      });
+
+      const isbnInexistente = '9999999999999';
+      
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: isbnInexistente,
+          title: 'Livro com ISBN Inexistente',
+          pages: 100,
+        });
+
+      // Deve criar normalmente, pois title e pages foram fornecidos manualmente
+      expect(response.status).toBe(201);
+      expect(response.body.title).toBe('Livro com ISBN Inexistente');
+      expect(response.body.pages).toBe(100);
+    });
+
+    it('deve falhar quando API não retorna dados e campos não foram fornecidos (400)', async () => {
+      // Mock da resposta vazia (livro não encontrado)
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}) // Retorna objeto vazio
+      });
+
+      const isbnInexistente = '8888888888888';
+      
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: isbnInexistente,
+          // Não enviando title e pages - API não vai encontrar, então deve falhar
+        });
+
+      // Deve falhar porque nem API nem usuário forneceram title e pages
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('O Título (manual ou via ISBN) é obrigatório');
+    });
+
+    it('deve falhar quando API retorna título mas não páginas (400)', async () => {
+      // Mock da resposta com título mas sem páginas
+      const mockOpenLibraryResponse = {
+        'ISBN:9788532511013': {
+          title: 'Livro sem informações de páginas'
+          // number_of_pages não está presente
+        }
+      };
+
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockOpenLibraryResponse
+      });
+
+      const response = await request(app)
+        .post('/api/v1/materials')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({
+          type: 'LIVRO',
+          authorId: authorA.id,
+          isbn: '9788532511013',
+          // Não enviando pages - deve falhar mesmo com título da API
+        });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('O Título (manual ou via ISBN) é obrigatório e deve ter entre 3 e 100 caracteres.');
     });
   });
 });
