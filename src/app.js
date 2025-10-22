@@ -1,7 +1,9 @@
 const express = require('express');
+const cors = require('cors');
 const mainRouter = require('./routes'); // Importa o roteador principal
 
 const app = express();
+app.use(cors());
 
 app.use(express.json()); 
 
