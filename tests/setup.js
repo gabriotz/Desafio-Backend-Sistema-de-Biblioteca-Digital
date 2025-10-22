@@ -25,16 +25,15 @@ try {
 }
 
 // Limpeza do banco
-beforeEach(async () => {
-  if (global.prisma.material && global.prisma.material.deleteMany) {
-    await global.prisma.material.deleteMany();
-    await global.prisma.autor.deleteMany();
-    await global.prisma.user.deleteMany();
-  }
+beforeAll(async () => {
+  await prisma.$connect();
+  global.prisma = prisma;
 });
 
+// Limpeza completa após todos os testes
 afterAll(async () => {
-  if (global.prisma.$disconnect) {
-    await global.prisma.$disconnect();
-  }
+  await prisma.material.deleteMany();
+  await prisma.autor.deleteMany();
+  await prisma.user.deleteMany();
+  await prisma.$disconnect();
 });

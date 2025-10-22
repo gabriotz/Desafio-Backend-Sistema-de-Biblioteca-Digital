@@ -1,12 +1,20 @@
 const request = require('supertest');
-const app = require('../../src/app'); // Importa seu app Express
-const prisma = global.prisma;// Importa o Prisma
+const app = require('../../src/app');
+const prisma = global.prisma;
 const jwt = require('jsonwebtoken');
 
-// Descreve o conjunto de testes
 describe('Auth Routes (POST /api/v1/users/register)', () => {
+  beforeEach(async () => {
+    // Limpa usuários de teste antes de cada teste
+    await prisma.user.deleteMany({
+      where: {
+        email: {
+          in: ['teste@exemplo.com', 'duplicado@exemplo.com']
+        }
+      }
+    });
+  });
 
-  // Teste 1: O "caminho feliz"
   it('deve criar um novo usuário com sucesso', async () => {
     const response = await request(app)
       .post('/api/v1/users/register')
@@ -15,18 +23,15 @@ describe('Auth Routes (POST /api/v1/users/register)', () => {
         password: 'senha123',
       });
 
-    // 1. Checa a Resposta HTTP
     expect(response.statusCode).toBe(201);
     expect(response.body).toHaveProperty('id');
     expect(response.body.email).toBe('teste@exemplo.com');
 
-    // 2. Checa o Banco de Dados
     const userInDb = await prisma.user.findUnique({ where: { email: 'teste@exemplo.com' } });
     expect(userInDb).not.toBeNull();
     expect(userInDb.email).toBe('teste@exemplo.com');
   });
 
-  // Teste 2: Validação de e-mail inválido
   it('deve retornar 400 para e-mail inválido', async () => {
     const response = await request(app)
       .post('/api/v1/users/register')
@@ -39,7 +44,6 @@ describe('Auth Routes (POST /api/v1/users/register)', () => {
     expect(response.body.error).toBe('Formato de e-mail inválido.');
   });
 
-  // Teste 3: Validação de e-mail duplicado (Conflito)
   it('deve retornar 409 para e-mail duplicado', async () => {
     // Primeiro, cria um usuário
     await request(app)
@@ -51,19 +55,20 @@ describe('Auth Routes (POST /api/v1/users/register)', () => {
       .post('/api/v1/users/register')
       .send({ email: 'duplicado@exemplo.com', password: 'senha123' });
 
-    // 1. Checa a Resposta HTTP
     expect(response.statusCode).toBe(409);
     expect(response.body.error).toBe('Este e-mail já está em uso.');
   });
 });
 
-
-
-
-
-
 describe('Auth Routes (POST /api/v1/users/login)', () => {
   beforeEach(async () => {
+    // Limpa usuários existentes primeiro
+    await prisma.user.deleteMany({
+      where: {
+        email: 'usuario@teste.com'
+      }
+    });
+
     // Cria um usuário para testar login
     await prisma.user.create({
       data: {
@@ -143,27 +148,37 @@ describe('Auth Routes (POST /api/v1/users/login)', () => {
   });
 });
 
-
-
-
 describe('Auth Routes (GET /api/v1/users/profile)', () => {
   let authToken;
+  let testUser;
 
   beforeEach(async () => {
-    // Cria usuário e pega token
-    const user = await prisma.user.create({
+    // Limpa usuários existentes primeiro
+    await prisma.user.deleteMany({
+      where: { email: 'perfil@teste.com' }
+    });
+
+    // Cria usuário
+    testUser = await prisma.user.create({
       data: {
         email: 'perfil@teste.com',
         password: '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
       },
     });
 
-    // Gera token JWT (simulando o login)
+    // Gera token
     authToken = jwt.sign(
-      { userId: user.id },
+      { userId: testUser.id },
       process.env.JWT_SECRET,
       { expiresIn: '6h' }
     );
+  });
+
+  afterEach(async () => {
+    // Limpeza mais agressiva
+    await prisma.user.deleteMany({
+      where: { email: 'perfil@teste.com' }
+    });
   });
 
   test('deve retornar perfil do usuário com token válido', async () => {
@@ -175,7 +190,7 @@ describe('Auth Routes (GET /api/v1/users/profile)', () => {
     expect(response.body).toHaveProperty('id');
     expect(response.body).toHaveProperty('email', 'perfil@teste.com');
     expect(response.body).toHaveProperty('createdAt');
-    expect(response.body).not.toHaveProperty('password'); // Senha nunca deve ser retornada
+    expect(response.body).not.toHaveProperty('password');
   });
 
   test('deve retornar 401 sem token', async () => {
@@ -185,27 +200,27 @@ describe('Auth Routes (GET /api/v1/users/profile)', () => {
     expect(response.statusCode).toBe(401);
   });
 
- test('deve retornar erro com token inválido', async () => {
-  const response = await request(app)
-    .get('/api/v1/users/profile')
-    .set('Authorization', 'Bearer token-invalido');
+  test('deve retornar erro com token inválido', async () => {
+    const response = await request(app)
+      .get('/api/v1/users/profile')
+      .set('Authorization', 'Bearer token-invalido');
 
-  // Aceita 401 ou 403 - ambos são códigos de erro de autenticação
-  expect([401, 403]).toContain(response.statusCode);
+    expect([401, 403]).toContain(response.statusCode);
+  });
+
+  test('deve retornar erro com token de usuário inexistente', async () => {
+    const fakeToken = jwt.sign(
+      { userId: 999999 },
+      process.env.JWT_SECRET,
+      { expiresIn: '6h' }
+    );
+
+    const response = await request(app)
+      .get('/api/v1/users/profile')
+      .set('Authorization', `Bearer ${fakeToken}`);
+
+    expect([401, 404, 500]).toContain(response.statusCode);
+  });
 });
 
-test('deve retornar erro com token de usuário inexistente', async () => {
-  const fakeToken = jwt.sign(
-    { userId: 999999 }, // ID que não existe no banco
-    process.env.JWT_SECRET,
-    { expiresIn: '6h' }
-  );
-
-  const response = await request(app)
-    .get('/api/v1/users/profile')
-    .set('Authorization', `Bearer ${fakeToken}`);
-
-  // Pode ser 404, 401 ou 500 - vamos ver o que seu código retorna
-  expect([401, 404, 500]).toContain(response.statusCode);
-});
-});
+// REMOVA qualquer describe block vazio no final do arquivo
