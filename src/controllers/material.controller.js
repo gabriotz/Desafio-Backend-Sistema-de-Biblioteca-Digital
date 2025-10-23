@@ -187,7 +187,7 @@ const createMaterialController = async (req, res) => {
 // NOVO CONTROLLER 
 const getAllMaterialsController = async (req, res) => {
   // Extrair query params para paginação e filtros
-  const { page = 1, limit = 10, title, type, authorName } = req.query;
+  const { page = 1, limit = 10, title, type, authorName, description } = req.query;
 
   // Converter para números
   const pageNum = parseInt(page);
@@ -219,6 +219,12 @@ const getAllMaterialsController = async (req, res) => {
         contains: authorName,
         mode: 'insensitive',
       },
+    };
+  }
+  if (description){
+    where.description = {
+      contains: description,
+      mode: 'insensitive',
     };
   }
 

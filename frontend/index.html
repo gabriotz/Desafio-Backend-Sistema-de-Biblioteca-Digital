@@ -9,9 +9,126 @@
 <body>
     <h1>Biblioteca Digital</h1>
 
-    <h2>Materiais Públicos</h2>
+    <div id="auth-section">
+         <div id="login-form-container">
+            <h2>Login</h2>
+            <form id="login-form">
+                <label for="login-email">Email:</label>
+                <input type="email" id="login-email" required><br>
+                <label for="login-password">Senha:</label>
+                <input type="password" id="login-password" required><br>
+                <button type="submit">Entrar</button>
+                <p id="login-error" class="error-message"></p>
+            </form>
+        </div>
+        <div id="register-form-container">
+             <h2>Novo Cadastro</h2>
+             <form id="register-form">
+                 <label for="register-email">Email:</label>
+                 <input type="email" id="register-email" required><br>
+                 <label for="register-password">Senha (mín. 6):</label>
+                 <input type="password" id="register-password" required minlength="6"><br>
+                 <label for="register-password-confirm">Confirme Senha:</label>
+                 <input type="password" id="register-password-confirm" required minlength="6"><br>
+                 <button type="submit">Cadastrar</button>
+                 <p id="register-message" class="message"></p>
+             </form>
+         </div>
+        <div id="user-info" style="display: none;">
+            <p>Bem-vindo, <span id="user-email"></span> (ID: <span id="user-id"></span>)!</p>
+            <button id="logout-button">Sair</button>
+        </div>
+    </div>
+    <hr>
+
+    <div id="create-author-section" style="display: none;">
+        <h2>Cadastrar Novo Autor</h2>
+        <form id="create-author-form">
+            <label for="author-name">Nome:</label>
+            <input type="text" id="author-name" required minlength="3" maxlength="120"><br> <label for="author-type">Tipo:</label>
+            <select id="author-type" required>
+                <option value="">Selecione...</option>
+                <option value="PESSOA">Pessoa</option>
+                <option value="INSTITUICAO">Instituição</option>
+            </select><br>
+
+            <div id="author-specific-fields">
+                </div>
+
+            <button type="submit">Cadastrar Autor</button>
+            <p id="author-create-message" class="message"></p>
+        </form>
+        <hr>
+    </div>
+
+    <div id="create-material-section" style="display: none;">
+        <h2>Cadastrar Novo Material</h2>
+        <form id="create-material-form">
+            <label for="material-title">Título (Opcional se ISBN):</label>
+            <input type="text" id="material-title" minlength="3" maxlength="100"><br>
+            <label for="material-type">Tipo:</label>
+            <select id="material-type" required>
+                <option value="">Selecione...</option>
+                <option value="LIVRO">Livro</option>
+                <option value="ARTIGO">Artigo</option>
+                <option value="VIDEO">Vídeo</option>
+            </select><br>
+            <label for="material-authorId">ID do Autor:</label>
+            <input type="number" id="material-authorId" required><br>
+            <label for="material-status">Status:</label>
+            <select id="material-status">
+                <option value="RASCUNHO">Rascunho</option>
+                <option value="PUBLICADO">Publicado</option>
+                <option value="ARQUIVADO">Arquivado</option>
+            </select><br>
+            <label for="material-description">Descrição (Opcional):</label>
+            <textarea id="material-description" maxlength="1000"></textarea><br>
+            <div id="specific-fields"></div>
+            <button type="submit">Cadastrar Material</button>
+            <p id="create-error" class="error-message"></p>
+        </form>
+        <hr>
+    </div>
+
+    <div id="filter-section">
+        <h2>Buscar Materiais Públicos</h2>
+        <form id="filter-form">
+            <label for="filter-title">Título:</label>
+            <input type="text" id="filter-title"><br>
+            <label for="filter-author">Autor:</label>
+            <input type="text" id="filter-author"><br>
+            <label for="filter-description">Descrição:</label>
+            <input type="text" id="filter-description"><br>
+            <button type="submit">Buscar</button>
+            <button type="button" id="clear-filter-button">Limpar Filtros</button>
+        </form>
+        <hr>
+    </div>
+
+    <h2>Materiais</h2>
     <div id="materials-list">
-        Carregando materiais...
+        </div>
+
+    <div id="edit-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeEditModal()">&times;</span>
+            <h2>Editar Material</h2>
+            <form id="edit-material-form">
+                <input type="hidden" id="edit-material-id">
+                <label for="edit-material-title">Título:</label>
+                <input type="text" id="edit-material-title" required minlength="3" maxlength="100"><br>
+                <label for="edit-material-status">Status:</label>
+                <select id="edit-material-status" required>
+                    <option value="RASCUNHO">Rascunho</option>
+                    <option value="PUBLICADO">Publicado</option>
+                    <option value="ARQUIVADO">Arquivado</option>
+                </select><br>
+                <label for="edit-material-description">Descrição:</label>
+                <textarea id="edit-material-description" maxlength="1000"></textarea><br>
+                <button type="submit">Salvar Alterações</button>
+                <p id="edit-error" class="error-message"></p>
+            </form>
+        </div>
     </div>
 
     <script src="script.js"></script>
